@@ -20,7 +20,7 @@ POWERFUL_ACTIONS = ["config:DeleteConfigRule","lambda:AddPermission","lambda:Del
                     "iam:DeleteSSHPublicKey"]
 
 session = boto3.Session(profile_name=PROFILE_NAME, region_name=REGION_NAME)
-iam_client = session.client('iam', config=Config(proxies={'https': 'foo.bar@40.0.40.10:9000','http': 'foo.bar@40.0.40.10:9000'}))
+iam_client = session.client('iam')
 
 fName = "aws_policy_audit_"+strftime("%m_%d_%Y",gmtime())+".csv"
 fPath = "c:\\temp\\"+fName
