@@ -1,5 +1,11 @@
 import boto3,logging,json,os
 from botocore.config import Config
+import csv
+import datetime
+from time import gmtime,strftime
+
+PROFILE_NAME = 'cloudteamsandbox'
+REGION_NAME = 'us-east-2'
 
 POWERFUL_ACTIONS = ["config:DeleteConfigRule","lambda:AddPermission","lambda:DeleteFunction","lambda:InvokeFunction",
                     "kms:CreateKey","kms:Decrypt","kms:DisableKey","athena:DeleteNamedQuery","dynamodb:CreateBackup",
@@ -13,8 +19,36 @@ POWERFUL_ACTIONS = ["config:DeleteConfigRule","lambda:AddPermission","lambda:Del
                     "ec2:DeleteVpnConnection","ec2:DeleteVpnConnectionRoute","ec2:DeleteVpnGateway","cloudformation:DeleteStack","iam:DeleteSAMLProvider",
                     "iam:DeleteSSHPublicKey"]
 
-session = boto3.Session(profile_name='default', region_name='us-east-2')
-iam_client = session.client('iam')
+session = boto3.Session(profile_name=PROFILE_NAME, region_name=REGION_NAME)
+iam_client = session.client('iam', config=Config(proxies={'https': 'foo.bar@40.0.40.10:9000','http': 'foo.bar@40.0.40.10:9000'}))
+
+fName = "aws_policy_audit_"+strftime("%m_%d_%Y",gmtime())+".csv"
+fPath = "c:\\temp\\"+fName
+if os.path.exists(fPath):
+    os.remove(fPath)
+outFile = open(fPath,"w+")
+outFile.write("%s,%s,%s,%s,%s,%s\n"%('IAM Resource Type','Resource Name','Action Name','Source Name','Evaluation Decision','Source Policy Id'))
+outFile.flush()
+
+
+def iam_simulation_function(iamResourceType,resourceName,resourceArn,oFile):
+    try:
+        all_simlumation_results = iam_client.simulate_principal_policy(
+        PolicySourceArn = resourceArn,
+        ActionNames = POWERFUL_ACTIONS    
+        ).get('EvaluationResults',[])
+        for simulation_result in all_simlumation_results:
+            if simulation_result['EvalDecision'] == 'allowed':
+                actionName = simulation_result.get('EvalActionName')
+                sourceName = simulation_result.get('EvalResourceName')
+                evaluationDecision = simulation_result.get('EvalDecision')
+                for policyInfo in simulation_result.get('MatchedStatements',[]):
+                    sourcePolicyId = policyInfo.get('SourcePolicyId')
+                oFile.write("%s,%s,%s,%s,%s,%s\n"%(iamResourceType,resourceName,actionName,sourceName,evaluationDecision,sourcePolicyId))
+                oFile.flush()    
+    except Exception as e:
+        raise Exception("[ErrorMessage]: " + str(e))            
+
 
 # All IAM Users
 try:
@@ -26,7 +60,9 @@ try:
             'UserArn': iamUser['Arn']
         }
         userList.append(userdata)
-    print(userList)
+
+    for usr in userList:
+       iam_simulation_function('User',usr['UserName'],usr['UserArn'],outFile)
 
 except Exception as e:
     raise Exception("[ErrorMessage]: " + str(e))
@@ -41,8 +77,10 @@ try:
             'GroupArn': iamGroup['Arn']
         }
         groupList.append(groupData)
-    print(groupList)
-        
+
+    for grp in groupList:
+        iam_simulation_function('Group',grp['GroupName'],grp['GroupArn'],outFile)
+
 except Exception as e:
     raise Exception("[ErrorMessage]: " + str(e))
 
@@ -56,29 +94,17 @@ try:
             'RoleArn': iamRole['Arn']
         }
         roleList.append(roleData)
-        
+
+    for role in roleList:
+       iam_simulation_function('Role',role['RoleName'],role['RoleArn'],outFile)
+
 except Exception as e:
     raise Exception("[ErrorMessage]: " + str(e))
 
-# All IAM Policies    
-try:
-    allIamPolicies = iam_client.list_policies().get('Policies',[])
-    policyList = []
-    for iamPolicy in allIamPolicies:
-        policyData = {
-            'PolicyName': iamPolicy['PolicyName'],
-            'PolicyArn': iamPolicy['Arn']
-        }
-        policyList.append(policyData)
-        
+
+
+
 except Exception as e:
     raise Exception("[ErrorMessage]: " + str(e))
 
-# all_simlumation_results = iam_client.simulate_principal_policy(
-#     PolicySourceArn = 'arn:aws:iam:::user/s3apicreate',
-#     ActionNames = POWERFUL_ACTIONS    
-# ).get('EvaluationResults',[])
-
-# for simulation_result in all_simlumation_results:
-#     if simulation_result['EvalDecision'] == 'allowed':
-#         print(simulation_result)    
+outFile.close()
